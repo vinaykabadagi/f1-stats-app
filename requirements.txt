@@ -4,3 +4,5 @@ psycopg2-binary
 pydantic
 python-dotenv
 google-genai
+redis
+fastapi-limiter

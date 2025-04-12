@@ -95,6 +95,14 @@ button:hover {
     margin: 20px 0;
 }
 
+.success {
+    background-color: #28a745;
+    color: #ffffff;
+    padding: 10px;
+    border-radius: 4px;
+    margin: 20px 0;
+}
+
 #sqlOutput {
     margin: 20px 0;
     padding: 10px;
@@ -130,4 +138,61 @@ tr:nth-child(even) {
 
 tr:hover {
     background-color: #5a5a5a;
+}
+
+.chart-section {
+    margin-top: 30px;
+    padding: 20px;
+    background-color: #3c3c3c;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.export-button {
+    margin: 20px 0;
+    background-color: #28a745;
+}
+
+.export-button:hover {
+    background-color: #218838;
+}
+
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin: 2rem 0;
+}
+
+.pagination button {
+    min-width: 100px;
+}
+
+.pagination button:disabled {
+    background-color: #666;
+    cursor: not-allowed;
+}
+
+.keyboard-hints {
+    margin-top: 10px;
+    text-align: center;
+    color: #888;
+    font-size: 0.9em;
+}
+
+.keyboard-hint {
+    display: inline-flex;
+    align-items: center;
+    margin: 0 10px;
+}
+
+.key {
+    display: inline-block;
+    padding: 2px 6px;
+    background: #3c3c3c;
+    border: 1px solid #555;
+    border-radius: 4px;
+    margin: 0 4px;
+    font-family: monospace;
 }
