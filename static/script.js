@@ -170,10 +170,16 @@ async function submitQuery(isPageChange = false) {
             })
         });
 
-        const data = await response.json();
+        let data;
+        try {
+            data = await response.json();
+        } catch (parseError) {
+            // Handle JSON parsing errors
+            throw new Error("Server response was not valid JSON. Please try again later.");
+        }
 
         if (!response.ok) {
-            throw new Error(data.message || "An error occurred while fetching data");
+            throw new Error(data.message || data.detail?.message || "An error occurred while fetching data");
         }
 
         // Display SQL

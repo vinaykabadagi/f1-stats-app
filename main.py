@@ -77,6 +77,25 @@ async def http_exception_handler(request, exc):
         }
     )
 
+# Custom error handler for all exceptions
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    if isinstance(exc, HTTPException):
+        status_code = exc.status_code
+        detail = exc.detail
+    else:
+        status_code = 500
+        detail = str(exc)
+    
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": True,
+            "message": detail if isinstance(detail, str) else detail.get("message", str(exc)),
+            "detail": detail if isinstance(detail, dict) else None
+        }
+    )
+
 # Hugging Face Inference API client
 client = genai.Client(api_key=os.getenv("gemini_api_key"))
 
