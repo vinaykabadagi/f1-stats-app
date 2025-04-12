@@ -25,7 +25,7 @@ app = FastAPI(title="F1 Stats API",
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=[os.getenv("ALLOWED_ORIGINS", "https://f1-stats-app.onrender.com")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -205,14 +205,26 @@ def generate_sql_query(query: str) -> str:
 # Initialize Redis for rate limiting
 @app.on_event("startup")
 async def startup():
-    redis_client = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
-    await FastAPILimiter.init(redis_client)
+    try:
+        # Get Redis URL from environment variable (Render provides this)
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        redis_client = redis.from_url(redis_url, decode_responses=True)
+        await FastAPILimiter.init(redis_client)
+    except Exception as e:
+        print(f"Warning: Rate limiting is disabled - Redis connection failed: {e}")
+        # Continue without rate limiting if Redis is not available
+        pass
 
-# Add rate limiting to the query endpoint
+# Add rate limiting to the query endpoint, but make it optional
+async def get_rate_limiter():
+    if FastAPILimiter._redis:  # Only apply rate limiting if Redis is connected
+        return RateLimiter(times=10, seconds=60)
+    return None
+
 @app.post("/query")
 async def run_query(
     request: QueryRequest,
-    _: Any = Depends(RateLimiter(times=10, seconds=60))  # 10 requests per minute
+    rate_limit: Optional[Any] = Depends(get_rate_limiter)
 ) -> Dict[str, Any]:
     try:
         # Input validation
