@@ -1,100 +1,39 @@
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import psycopg2
-from psycopg2 import pool
 import os
 import re
 from google import genai
 from fastapi.staticfiles import StaticFiles
-from typing import List, Dict, Any, Optional
-from fastapi.responses import JSONResponse
-from fastapi_limiter import FastAPILimiter
-from fastapi_limiter.depends import RateLimiter
-import redis.asyncio as redis
-
 # Load environment variables
 load_dotenv()
 
 # FastAPI app
-app = FastAPI(title="F1 Stats API",
-             description="API for querying Formula 1 statistics",
-             version="1.0.0")
+app = FastAPI()
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[os.getenv("ALLOWED_ORIGINS", "https://f1-stats-app.onrender.com")],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Serve static files
+# Serve static files (HTML, CSS, JS)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Create connection pool
-try:
-    connection_pool = pool.SimpleConnectionPool(
-        minconn=1,
-        maxconn=10,
-        user=os.getenv("SUPABASE_USER"),
-        password=os.getenv("SUPABASE_PASSWORD"),
-        host=os.getenv("SUPABASE_HOST"),
-        port=os.getenv("SUPABASE_PORT"),
-        dbname=os.getenv("SUPABASE_DBNAME")
-    )
-except Exception as e:
-    print(f"Failed to create connection pool: {e}")
-    raise
-
+# Pydantic model for request
 class QueryRequest(BaseModel):
     query: str
 
+# Database connection
 def get_db_connection():
     try:
-        conn = connection_pool.getconn()
+        conn = psycopg2.connect(
+            user=os.getenv("SUPABASE_USER"),
+            password=os.getenv("SUPABASE_PASSWORD"),
+            host=os.getenv("SUPABASE_HOST"),
+            port=os.getenv("SUPABASE_PORT"),
+            dbname=os.getenv("SUPABASE_DBNAME")
+        )
+        print("Database connection established")
         return conn
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "Database connection error",
-                "error": str(e)
-            }
-        )
-
-# Custom error handler
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": True,
-            "message": exc.detail if isinstance(exc.detail, str) else exc.detail.get("message"),
-            "details": exc.detail if isinstance(exc.detail, dict) else None
-        }
-    )
-
-# Custom error handler for all exceptions
-@app.exception_handler(Exception)
-async def general_exception_handler(request, exc):
-    if isinstance(exc, HTTPException):
-        status_code = exc.status_code
-        detail = exc.detail
-    else:
-        status_code = 500
-        detail = str(exc)
-    
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "error": True,
-            "message": detail if isinstance(detail, str) else detail.get("message", str(exc)),
-            "detail": detail if isinstance(detail, dict) else None
-        }
-    )
+        print(f"Failed to connect to database: {e}")
+        raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
 
 # Hugging Face Inference API client
 client = genai.Client(api_key=os.getenv("gemini_api_key"))
@@ -192,142 +131,59 @@ def generate_sql_query(query: str) -> str:
     try:
         prompt = SQL_PROMPT.format(query=query)
         response = client.models.generate_content(
-            model="gemini-2.0-flash", 
-            contents=prompt
-        )
-        
-        if not response or not response.text:
-            raise ValueError("No response from LLM")
-            
+    model="gemini-2.0-flash", contents=prompt
+)
+        print(f"Raw LLM response : {response.text}")
+        # Extract SQL query
         sql_query = response.text.strip()
-        
+        print(f"Raw SQL response: {sql_query}")
         # Clean up the SQL query
         sql_query = sql_query.split("SQL:")[-1].strip()
-        if "```" in sql_query:
-            sql_query = re.search(r"```(?:sql)?(.*?)```", sql_query, re.DOTALL)
-            if sql_query:
-                sql_query = sql_query.group(1).strip()
-            
-        if not sql_query:
-            raise ValueError("Failed to generate valid SQL query")
-            
+        if sql_query.startswith("```sql"):
+            sql_query = sql_query.split("```sql")[1].split("```")[0].strip()
+        elif sql_query.startswith("```"):
+            sql_query = sql_query.split("```")[1].strip()
+        # Remove any leading/trailing whitespace
+        sql_query = sql_query.strip()   
+        if "```sql" in sql_query:
+            sql_query = sql_query.split("```sql")[1].split("```")[0].strip()
+        elif "```" in sql_query:
+            sql_query = sql_query.split("```")[1].strip()
+        print(f"Generated SQL: {sql_query}")
         return sql_query
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "Failed to generate SQL query",
-                "error": str(e)
-            }
-        )
-
-# Initialize Redis for rate limiting
-@app.on_event("startup")
-async def startup():
-    try:
-        # Get Redis URL from environment variable (Render provides this)
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-        redis_client = redis.from_url(redis_url, decode_responses=True)
-        await FastAPILimiter.init(redis_client)
-    except Exception as e:
-        print(f"Warning: Rate limiting is disabled - Redis connection failed: {e}")
-        # Continue without rate limiting if Redis is not available
-        pass
-
-# Add rate limiting to the query endpoint, but make it optional
-async def get_rate_limiter():
-    if FastAPILimiter._redis:  # Only apply rate limiting if Redis is connected
-        return RateLimiter(times=10, seconds=60)
-    return None
+        print(f"Error generating SQL: {e}")
+        raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
 
 @app.post("/query")
-async def run_query(
-    request: QueryRequest,
-    rate_limit: Optional[Any] = Depends(get_rate_limiter)
-) -> Dict[str, Any]:
+async def run_query(request: QueryRequest):
     try:
-        # Input validation
-        if not request.query.strip():
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": "Query cannot be empty",
-                    "error": "Invalid input"
-                }
-            )
-
         # Generate SQL
         sql_query = generate_sql_query(request.query)
         
-        # Validate query for security
-        sql_lower = sql_query.lower()
-        if not re.match(r"^\s*SELECT\b", sql_lower):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": "Only SELECT queries are allowed",
-                    "error": "Security violation"
-                }
-            )
+        # Validate query
+        if not re.match(r"^\s*SELECT\b", sql_query, re.IGNORECASE):
             
-        dangerous_keywords = ["drop", "delete", "truncate", "alter", "insert", "update"]
-        if any(keyword in sql_lower for keyword in dangerous_keywords):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": "Unsafe SQL query detected",
-                    "error": "Security violation"
-                }
-            )
-
+            raise HTTPException(status_code=400, detail="Only SELECT queries allowed")
+        if any(dangerous in sql_query.lower() for dangerous in ["drop", "delete", "truncate", "alter", "insert", "update"]):
+            raise HTTPException(status_code=400, detail="Unsafe SQL query detected")
         allowed_tables = {"circuits", "constructors", "drivers", "races", "results"}
-        if not any(table in sql_lower for table in allowed_tables):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": "Invalid table referenced",
-                    "error": "Security violation"
-                }
-            )
+        if not any(table in sql_query.lower() for table in allowed_tables):
+            raise HTTPException(status_code=400, detail="Invalid table referenced")
 
-        # Execute query with pagination
+        # Execute query
         conn = get_db_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(sql_query)
-            results = cur.fetchall()
-            columns = [desc[0] for desc in cur.description]
-            formatted_results = [dict(zip(columns, row)) for row in results]
-            
-            return {
-                "query": request.query,
-                "sql": sql_query,
-                "results": formatted_results,
-                "count": len(formatted_results)
-            }
-        finally:
-            cur.close()
-            connection_pool.putconn(conn)
-            
-    except psycopg2.Error as e:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": "Database error",
-                "error": str(e)
-            }
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "Internal server error",
-                "error": str(e)
-            }
-        )
+        cur = conn.cursor()
+        cur.execute(sql_query)
+        results = cur.fetchall()
+        columns = [desc[0] for desc in cur.description]
+        cur.close()
+        conn.close()
 
-# Cleanup connection pool when app stops
-@app.on_event("shutdown")
-async def shutdown():
-    if connection_pool:
-        connection_pool.closeall()
+        # Format results
+        formatted_results = [dict(zip(columns, row)) for row in results]
+        return {"query": request.query, "sql": sql_query, "results": formatted_results}
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
