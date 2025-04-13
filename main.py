@@ -6,6 +6,14 @@ import os
 import re
 from google import genai
 from fastapi.staticfiles import StaticFiles
+from psycopg2.pool import SimpleConnectionPool
+from contextlib import contextmanager
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Load environment variables
 load_dotenv()
 
@@ -20,23 +28,35 @@ class QueryRequest(BaseModel):
     query: str
 
 # Database connection
-def get_db_connection():
-    try:
-        conn = psycopg2.connect(
-            user=os.getenv("SUPABASE_USER"),
-            password=os.getenv("SUPABASE_PASSWORD"),
-            host=os.getenv("SUPABASE_HOST"),
-            port=os.getenv("SUPABASE_PORT"),
-            dbname=os.getenv("SUPABASE_DBNAME")
-        )
-        print("Database connection established")
-        return conn
-    except Exception as e:
-        print(f"Failed to connect to database: {e}")
-        raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
+pool = None
 
-# Hugging Face Inference API client
-client = genai.Client(api_key=os.getenv("gemini_api_key"))
+def init_db_pool():
+    global pool
+    pool = SimpleConnectionPool(
+        minconn=1,
+        maxconn=10,
+        user=os.getenv("SUPABASE_USER"),
+        password=os.getenv("SUPABASE_PASSWORD"),
+        host=os.getenv("SUPABASE_HOST"),
+        port=os.getenv("SUPABASE_PORT"),
+        dbname=os.getenv("SUPABASE_DBNAME")
+    )
+
+@contextmanager
+def get_db_connection():
+    conn = None
+    try:
+        conn = pool.getconn()
+        yield conn
+    except Exception as e:
+        logger.error(f"Database connection error: {e}")
+        raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
+    finally:
+        if conn:
+            pool.putconn(conn)
+
+# Initialize Google Gemini client
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))  # Updated to match .env
 
 # SQL generation prompt
 SQL_PROMPT = """
@@ -155,6 +175,30 @@ def generate_sql_query(query: str) -> str:
         print(f"Error generating SQL: {e}")
         raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
 
+def validate_sql_query(sql: str) -> bool:
+    """Validate SQL query for security"""
+    # Check for dangerous SQL commands
+    dangerous_commands = [
+        r'\bdrop\b', r'\bdelete\b', r'\btruncate\b', r'\balter\b',
+        r'\binsert\b', r'\bupdate\b', r'\bcreate\b', r'\bexec\b',
+        r'\bunion\b', r'\binto\b'
+    ]
+    if any(re.search(pattern, sql, re.IGNORECASE) for pattern in dangerous_commands):
+        return False
+        
+    # Check if query starts with SELECT
+    if not re.match(r"^\s*SELECT\b", sql, re.IGNORECASE):
+        return False
+        
+    # Validate tables
+    allowed_tables = {"circuits", "constructors", "drivers", "races", "results"}
+    table_matches = re.findall(r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)|JOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)', sql, re.IGNORECASE)
+    tables = {match[0] or match[1] for match in table_matches}
+    if not all(table.lower() in allowed_tables for table in tables):
+        return False
+        
+    return True
+
 @app.post("/query")
 async def run_query(request: QueryRequest):
     try:
@@ -162,28 +206,40 @@ async def run_query(request: QueryRequest):
         sql_query = generate_sql_query(request.query)
         
         # Validate query
-        if not re.match(r"^\s*SELECT\b", sql_query, re.IGNORECASE):
-            
-            raise HTTPException(status_code=400, detail="Only SELECT queries allowed")
-        if any(dangerous in sql_query.lower() for dangerous in ["drop", "delete", "truncate", "alter", "insert", "update"]):
-            raise HTTPException(status_code=400, detail="Unsafe SQL query detected")
-        allowed_tables = {"circuits", "constructors", "drivers", "races", "results"}
-        if not any(table in sql_query.lower() for table in allowed_tables):
-            raise HTTPException(status_code=400, detail="Invalid table referenced")
+        if not validate_sql_query(sql_query):
+            raise HTTPException(status_code=400, detail="Invalid or unsafe SQL query")
 
-        # Execute query
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(sql_query)
-        results = cur.fetchall()
-        columns = [desc[0] for desc in cur.description]
-        cur.close()
-        conn.close()
+        # Execute query with connection pooling
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql_query)
+                results = cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
 
         # Format results
         formatted_results = [dict(zip(columns, row)) for row in results]
-        return {"query": request.query, "sql": sql_query, "results": formatted_results}
+        return {
+            "query": request.query,
+            "sql": sql_query,
+            "results": formatted_results,
+            "count": len(formatted_results)
+        }
     except psycopg2.Error as e:
+        logger.error(f"Database error: {e}")
         raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        logger.error(f"Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database pool when the application starts"""
+    init_db_pool()
+    logger.info("Application started, database pool initialized")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Close all database connections when the application shuts down"""
+    if pool:
+        pool.closeall()
+    logger.info("Application shutdown, database pool closed")
