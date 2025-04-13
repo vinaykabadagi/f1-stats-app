@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>F1 Stats App</title>
     <link rel="stylesheet" href="/static/styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <div class="container">
@@ -13,21 +12,16 @@
         <div class="input-section">
             <input type="text" id="queryInput" list="querySuggestions" placeholder="Enter query (e.g., Verstappen wins in 2023)" />
             <datalist id="querySuggestions">
-                <option value="Show me points scored by each constructor in 2023">
-                <option value="Who had the most fastest laps in 2023?">
-                <option value="Show me all Monaco Grand Prix winners">
-                <option value="Compare Hamilton and Verstappen's points in 2021">
-                <option value="Which drivers scored points in every race of 2023?">
+                <option value="Verstappen wins in 2023">
+                <option value="Fastest lap in Monaco 2023">
+                <option value="Hamilton’s podiums in 2022">
+                <option value="Top drivers in 2024">
+                <option value="Mercedes points in 2024">
             </datalist>
             <button onclick="submitQuery()">Submit</button>
         </div>
-        <div class="keyboard-hints">
-            <span class="keyboard-hint">Press <span class="key">Enter</span> to submit</span>
-            <span class="keyboard-hint">Press <span class="key">Cmd</span>+<span class="key">/</span> to focus input</span>
-        </div>
         <div id="loading" class="loading hidden">Loading...</div>
         <div id="errorOutput" class="error hidden"></div>
-        <div id="successOutput" class="success hidden"></div>
         <div id="sqlOutput"></div>
         <div id="resultsOutput"></div>
     </div>
