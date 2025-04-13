@@ -1,29 +1,44 @@
 # F1 Stats App
 
-An interactive Formula 1 statistics application that allows users to query F1 data using natural language and visualize the results.
+An interactive Formula 1 statistics application that allows users to query F1 data using natural language through an intuitive web interface.
 
 ## Features
 
-- Natural language to SQL query conversion
-- Real-time data visualization using Chart.js
-- Interactive data tables
-- Export results to CSV
-- Secure query execution with SQL injection prevention
-- Connection pooling for better performance
-- Error handling and user feedback
-- Responsive design
+- Natural language to SQL query conversion using Google's Gemini AI
+- Real-time SQL query generation and execution
+- Interactive data tables with responsive design
+- Query debouncing for better performance
+- Connection pooling for efficient database management
+- Comprehensive SQL injection prevention
+- Automatic loading states and error handling
+- F1-themed modern UI design
+
+## Tech Stack
+
+- Backend: FastAPI + Python 3.x
+- Database: PostgreSQL (via Supabase)
+- AI: Google Gemini API
+- Frontend: Vanilla JavaScript with modern ES6+ features
+- Styling: Custom CSS with responsive design
 
 ## Prerequisites
 
 - Python 3.x
-- PostgreSQL database
-- Node.js (optional, for development)
+- PostgreSQL database (Supabase account)
+- Google Gemini API key
 
 ## Installation
 
-1. Clone the repository
-2. Install Python dependencies:
+1. Clone the repository:
 ```bash
+git clone <repository-url>
+cd f1-stats-app
+```
+
+2. Create a virtual environment and install dependencies:
+```bash
+python3 -m venv venv
+source venv/bin/activate  # On Windows: .\venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -32,9 +47,9 @@ pip install -r requirements.txt
 SUPABASE_USER=your_db_user
 SUPABASE_PASSWORD=your_db_password
 SUPABASE_HOST=your_db_host
-SUPABASE_PORT=your_db_port
+SUPABASE_PORT=5432
 SUPABASE_DBNAME=your_db_name
-gemini_api_key=your_gemini_api_key
+GEMINI_API_KEY=your_gemini_api_key
 ```
 
 ## Running the Application
@@ -51,27 +66,35 @@ http://localhost:8000/static/index.html
 
 ## Usage
 
-1. Enter a natural language query about F1 statistics in the input field
-2. Click "Submit" or press Enter
-3. View the generated SQL and results table
-4. Explore the data visualization (if applicable)
-5. Export results to CSV if needed
+1. Enter a natural language query in the text area
+2. The query will be automatically processed after typing (with debouncing)
+3. View the generated SQL query in the code section
+4. See the results in a responsive table format
+5. Error messages will be displayed if something goes wrong
 
 ## Example Queries
 
-- Show me points scored by each constructor in 2023
-- Who had the most fastest laps in 2023?
-- Show me all Monaco Grand Prix winners
-- Compare Hamilton and Verstappen's points in 2021
-- Which drivers scored points in every race of 2023?
+- "Who won the most races in 2023?"
+- "Show me all Monaco Grand Prix winners"
+- "Compare Hamilton and Verstappen's points in 2021"
+- "Which drivers scored points in every race of 2023?"
+- "Show me the fastest lap times at Silverstone"
 
-## API Reference
+## Database Schema
+
+The application uses the following tables:
+- `circuits`: Track information and locations
+- `constructors`: F1 teams/constructors
+- `drivers`: Driver information
+- `races`: Race event details
+- `results`: Race results and statistics
+
+## API Endpoints
 
 ### POST /query
+Converts natural language to SQL and returns F1 statistics.
 
-Accepts natural language queries and returns F1 statistics.
-
-Request body:
+Request:
 ```json
 {
     "query": "string"
@@ -88,17 +111,29 @@ Response:
 }
 ```
 
-## Security
+## Security Features
 
-- SQL injection prevention
-- Input validation
+- SQL injection prevention through query validation
+- Input sanitization and validation
 - Query type restrictions (SELECT only)
 - Table access restrictions
+- Connection pooling with automatic cleanup
+- Error logging and handling
 
-## Contributing
+## Error Handling
 
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a new Pull Request
+- Invalid query detection
+- Database connection error handling
+- AI model error handling
+- Frontend error display with user-friendly messages
+- Comprehensive server-side logging
+
+## Development
+
+The application uses:
+- FastAPI for efficient API handling
+- Pydantic for data validation
+- psycopg2 connection pooling for database efficiency
+- Google Gemini AI for natural language processing
+- Modern JavaScript with async/await patterns
+- CSS custom properties for theming
